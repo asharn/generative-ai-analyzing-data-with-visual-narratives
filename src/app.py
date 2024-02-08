@@ -7,19 +7,15 @@ import io
 
 import pandas as pd
 from dash import Input, Output, State, callback, dcc, html
-import dash_ag_grid as dag
-import dash_chart_editor as dce
 import dash_mantine_components as dmc
 import dash_bootstrap_components as dbc
+import base64                  # for decoding images if recieved in the reply
 
 import base64
 
 from dash import (Dash, Input, Output, State, callback,
                   dcc, html, no_update, register_page, page_container)
 from dash.exceptions import PreventUpdate
-
-import plotly.express as px 
-import plotly.tools as tls
 
 import openai
 import pandas as pd
@@ -125,7 +121,6 @@ app.layout = dbc.Container(
         ),
         html.Div(
             [   
-                html.Div(id='sample_graph'),
                 dmc.Textarea(
                     placeholder=random.choice(
                         [
@@ -154,8 +149,42 @@ app.layout = dbc.Container(
                         style={"padding": "40px"}
                     ),
                 ),
+                
             ],
-            id="chat-plot-container",
+            id="chat-container-plot",
+        ),
+        html.Div(
+            [   
+                dmc.Textarea(
+                    placeholder=random.choice(
+                        [
+                            '"Enter text to generate any image"',
+                        ]
+                    ),
+                    autosize=True,
+                    minRows=2,
+                    id="generate-image-textarea",
+                    
+                ),
+                dmc.Group(
+                    [
+                        dmc.Button(
+                            "Generate Image",
+                            id="generate-image-button",
+                            disabled=True,
+                            style={"margin": "10px"}
+                        ),
+                    ],
+                    position="center",
+                ),
+                dmc.LoadingOverlay(
+                    html.Div(
+                        id="generate-image-output",
+                        style={"padding": "40px"}
+                    ),
+                ),
+            ],
+            id="chat-container-image",
         ),
         
 ])
@@ -163,7 +192,6 @@ app.layout = dbc.Container(
 
 
 def parse_contents(content):
-    
     # Decode the file content
     content_type, content_string = content.split(',')
     decoded = base64.b64decode(content_string)
@@ -198,7 +226,6 @@ def chat_window(n_clicks, json_data, question, cur):
         raise PreventUpdate
     
     raw_ques = question
-    plotly_fig = None
 
     if json_data is not None:
 
@@ -216,21 +243,11 @@ def chat_window(n_clicks, json_data, question, cur):
                 completion.choices[0].message.content, className="chat-item answer"
             ),
         ]
-        
-        df = SmartDataframe(df, config={'llm': llm, 'save_charts': True})
-        
-        #response = df.chat(query=f'Plot {raw_ques}')
-
-        #print("PANDAS AI CHAR RES", response)
-        #encoded_string = get_image_data(response)
-
-        #plotly_fig = ''#html.Img(src=f"data:image/png;base64,{encoded_string}", style={'height': '300px'})
 
         return (question + cur if cur else question), None
 
 
 @callback(
-    Output('sample_graph', 'children'),
     Output("chat-output-plot", "children"),
     Output("question-plot", "value"),
     Input("chat-submit-plot", "n_clicks"),
@@ -253,14 +270,67 @@ def plot_chat_window(n_clicks, json_data, question, cur):
 
         df = SmartDataframe(df, config={'llm': llm, 'save_charts': True})
         
-        response = df.chat(query=f'Plot {raw_ques}')
+        response = df.chat(query=question)
 
         print("PANDAS AI CHAR RES", response)
         encoded_string = get_image_data(response)
 
         plotly_fig = html.Img(src=f"data:image/png;base64,{encoded_string}", style={'height': '300px'})
 
-        return plotly_fig, (question + cur if cur else question), None
+        question = [
+            dcc.Markdown("USER : " + raw_ques, className="chat-item-plot question-plot",style={'color':'blue'}),
+            dcc.Markdown("AI Generated graph : ", className="chat-item-plot answer-plot"
+            ),
+            plotly_fig
+        ]
+
+        return (question + cur if cur else question), None
+
+@callback(
+    Output("generate-image-output", "children"),
+    Input("generate-image-button", "n_clicks"),
+    State("generate-image-textarea", "value"),
+    State("generate-image-output", "children"),
+    prevent_initial_call=True,
+)
+
+def generate_image_window(n_clicks, question, cur):
+
+    raw_ques = question
+    plotly_fig = None
+    print(question)
+    if question is not None:
+        
+        prompt = (
+            "Subject: " + question,  # use the space at end
+            "Style: funny."     # this is implicit line continuation
+            )
+
+        image_params = {
+            "model": "dall-e-2",  # Defaults to dall-e-2
+            "n": 1,               # Between 2 and 10 is only for DALL-E 2
+            "size": "1024x1024",  # 256x256, 512x512 only for DALL-E 2 - not much cheaper
+            "prompt": question,     # DALL-E 3: max 4000 characters, DALL-E 2: max 1000
+            "user": "simple-testing",     # pass a customer ID to OpenAI for abuse monitoring
+            }
+
+        image_params.update({"response_format": "b64_json"})  # defaults to "url" for separate download
+
+        images_response = openai.Image.create(**image_params)
+
+        #print("PANDAS AI Image RES", images_response['data'])
+        encoded_string = images_response.data[0]["b64_json"]
+
+        plotly_fig = html.Img(src=f"data:image/png;base64,{encoded_string}", style={'height': '300px'})
+
+        question = [
+            dcc.Markdown("USER : " + raw_ques, className="chat-item-generate-image generate-image-textarea",style={'color':'blue'}),
+            dcc.Markdown("AI Generated Image : ", className="chat-item-generate-image answer-image"
+            ),
+            plotly_fig
+        ]
+
+        return (question + cur if cur else question)
 
 
 @callback(Output("chat-submit", "disabled"), Input("question", "value"))
@@ -271,6 +341,9 @@ def disable_submit(question):
 def disable_submit(question):
     return not bool(question)
 
+@callback(Output("generate-image-button", "disabled"), Input("generate-image-textarea", "value"))
+def disable_submit(question):
+    return not bool(question)
 
 if __name__ == "__main__":
     app.run(debug=True, port=8056, host='localhost')
