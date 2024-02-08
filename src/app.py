@@ -31,8 +31,6 @@ from environs import Env
 import utils
 
 from environs import Env
-env = Env()
-env.read_env('.env')
 
 from pandasai import SmartDataframe
 from pandasai.llm import OpenAI
@@ -45,11 +43,9 @@ env.read_env('.env')
 
 llm = OpenAI(api_token=env.str('OPENAI_API_KEY'))
 
-openai.OPENAI_API_KEY = env.str('OPENAI_API_KEY')
+# print(env.str('OPENAI_API_KEY'))
 
-# Read the image file as base64 encoded string
-# with open(r"C:\Users\atul.kumar1\Downloads\ChartApp\exports\charts\temp_chart.png", "rb") as image_file:
-#     encoded_string = base64.b64encode(image_file.read()).decode()
+openai.api_key = env.str('OPENAI_API_KEY')
 
 def get_image_data(file_path):
     image_file = open(file_path, "rb")
@@ -92,7 +88,6 @@ app.layout = dbc.Container(
         dcc.Store(id='output-file-data'),
         html.Div(
             [   
-                html.Div(id='sample_graph'),
                 html.P("Ask about the dataset...", className="lead"),
                 dmc.Textarea(
                     placeholder=random.choice(
@@ -100,13 +95,13 @@ app.layout = dbc.Container(
                             '"Are there any outliers in this dataset?"',
                             '"What trends do you see in this dataset?"',
                             '"Anything stand out about this dataset?"',
-                            '"Do you recommend specific charts given this dataset?"',
                             '"What columns should I investigate further?"',
                         ]
                     ),
                     autosize=True,
                     minRows=2,
                     id="question",
+                    
                 ),
                 dmc.Group(
                     [
@@ -114,9 +109,10 @@ app.layout = dbc.Container(
                             "Submit",
                             id="chat-submit",
                             disabled=True,
+                            style={"margin": "10px"}
                         ),
                     ],
-                    position="right",
+                    position="center",
                 ),
                 dmc.LoadingOverlay(
                     html.Div(
@@ -126,10 +122,42 @@ app.layout = dbc.Container(
                 ),
             ],
             id="chat-container",
-            ),
-            
-            # dcc.Graph(id='sample_graph'),
-            html.Div(id='ask-chart-output')
+        ),
+        html.Div(
+            [   
+                html.Div(id='sample_graph'),
+                dmc.Textarea(
+                    placeholder=random.choice(
+                        [
+                            '"Do you recommend specific charts given this dataset?"',
+                        ]
+                    ),
+                    autosize=True,
+                    minRows=2,
+                    id="question-plot",
+                    
+                ),
+                dmc.Group(
+                    [
+                        dmc.Button(
+                            "Generate Plot",
+                            id="chat-submit-plot",
+                            disabled=True,
+                            style={"margin": "10px"}
+                        ),
+                    ],
+                    position="center",
+                ),
+                dmc.LoadingOverlay(
+                    html.Div(
+                        id="chat-output-plot",
+                        style={"padding": "40px"}
+                    ),
+                ),
+            ],
+            id="chat-plot-container",
+        ),
+        
 ])
 )
 
@@ -156,7 +184,6 @@ def update_output(content, name):
         return data.to_json(date_format='iso', orient='split'), html.H5(f'File Name: {name}')
 
 @callback(
-    Output('sample_graph', 'children'),
     Output("chat-output", "children"),
     Output("question", "value"),
     Input("chat-submit", "n_clicks"),
@@ -184,12 +211,46 @@ def chat_window(n_clicks, json_data, question, cur):
         )
         
         question = [
-            dcc.Markdown(
+            dcc.Markdown("USER : " +raw_ques, className="chat-item question",style={'color':'blue'}),
+            dcc.Markdown("AI : " +
                 completion.choices[0].message.content, className="chat-item answer"
             ),
-            dcc.Markdown(raw_ques, className="chat-item question"),
         ]
         
+        df = SmartDataframe(df, config={'llm': llm, 'save_charts': True})
+        
+        #response = df.chat(query=f'Plot {raw_ques}')
+
+        #print("PANDAS AI CHAR RES", response)
+        #encoded_string = get_image_data(response)
+
+        #plotly_fig = ''#html.Img(src=f"data:image/png;base64,{encoded_string}", style={'height': '300px'})
+
+        return (question + cur if cur else question), None
+
+
+@callback(
+    Output('sample_graph', 'children'),
+    Output("chat-output-plot", "children"),
+    Output("question-plot", "value"),
+    Input("chat-submit-plot", "n_clicks"),
+    State('output-file-data', 'data'),
+    State("question-plot", "value"),
+    State("chat-output-plot", "children"),
+    prevent_initial_call=True,
+)
+def plot_chat_window(n_clicks, json_data, question, cur):
+
+    if not json_data:
+        raise PreventUpdate
+    
+    raw_ques = question
+    plotly_fig = None
+
+    if json_data is not None:
+
+        df = pd.read_json(json_data, orient='split')
+
         df = SmartDataframe(df, config={'llm': llm, 'save_charts': True})
         
         response = df.chat(query=f'Plot {raw_ques}')
@@ -203,6 +264,10 @@ def chat_window(n_clicks, json_data, question, cur):
 
 
 @callback(Output("chat-submit", "disabled"), Input("question", "value"))
+def disable_submit(question):
+    return not bool(question)
+
+@callback(Output("chat-submit-plot", "disabled"), Input("question-plot", "value"))
 def disable_submit(question):
     return not bool(question)
 

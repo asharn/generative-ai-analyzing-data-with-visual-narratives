@@ -177,15 +177,3 @@ def update_output(contents, filename):
     )
 
     return file_div_element, preview
-
-
-
-@callback(
-    Output("upload-modal", "opened"),
-    Input("modal-demo-button", "n_clicks"),
-    Input("modal-close-button", "n_clicks"),
-    State("upload-modal", "opened"),
-    prevent_initial_call=True,
-)
-def modal_demo(nc1, nc2, opened):
-    return not opened
